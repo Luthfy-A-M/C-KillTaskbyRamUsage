@@ -49,20 +49,20 @@ DWORD GetProcessIdFromName(const std::wstring& processName)
 
 int CloseProcesIfExceedPrivateMemoryUsage(DWORD ProcessId, int RamExceed) {
 
-    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_TERMINATE, FALSE,ProcessId);
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ | PROCESS_TERMINATE, FALSE, ProcessId);
 
     if (hProcess == nullptr)
     {
-        std::cout << "Failed to open process" << std::endl;        
+        std::cout << "Failed to open process" << std::endl;
         return -1;
     }
 
     PROCESS_MEMORY_COUNTERS_EX pmc;
     if (GetProcessMemoryInfo(hProcess, reinterpret_cast<PPROCESS_MEMORY_COUNTERS>(&pmc), sizeof(pmc)))
-    {   
-        std::cout << "Private Working Set Size: " << (pmc.WorkingSetSize / 1000)  << "KB" << std::endl;
+    {
+        std::cout << "Private Working Set Private: " << (pmc.PrivateUsage / 1024) << "KB" << std::endl;
         //Start check And Kill Procedure
-        if (pmc.WorkingSetSize > RamExceed * 1000 * 1000) {
+        if (pmc.PrivateUsage > RamExceed * 1024 * 1024) {
             if (!TerminateProcess(hProcess, 0)) {
                 cerr << "Failed to terminate process. Error code: " << GetLastError() << endl;
                 CloseHandle(hProcess);
@@ -71,9 +71,9 @@ int CloseProcesIfExceedPrivateMemoryUsage(DWORD ProcessId, int RamExceed) {
             cout << "Process terminated successfully." << endl;
         }
         else {
-            cout << "Process is not using more than "<<RamExceed<<"MB of RAM." << endl;
+            cout << "Process is not using more than " << RamExceed << "MB of RAM. only using : " << pmc.PrivateUsage / 1024 / 1024 << "MB using Windows.h" << endl;
         }
-        
+
     }
     else
     {
@@ -87,14 +87,14 @@ int CloseProcesIfExceedPrivateMemoryUsage(DWORD ProcessId, int RamExceed) {
     if (!hNtDll) {
         printf("Failed to load ntdll.dll\n");
         CloseHandle(hProcess);
-        return 1;
+        return -1;
     }
 
     LPFN_NTQUERYVIRTUALMEMORY lpfnNtQueryVirtualMemory = (LPFN_NTQUERYVIRTUALMEMORY)GetProcAddress(hNtDll, "NtQueryVirtualMemory");
     if (!lpfnNtQueryVirtualMemory) {
         printf("Failed to get address of NtQueryVirtualMemory\n");
         CloseHandle(hProcess);
-        return 1;
+        return -1;
     }
 
     MEMORY_BASIC_INFORMATION mbi;
@@ -108,6 +108,18 @@ int CloseProcesIfExceedPrivateMemoryUsage(DWORD ProcessId, int RamExceed) {
         if (mbi.State == MEM_COMMIT && mbi.Type == MEM_PRIVATE) {
             dwPrivateBytes += mbi.RegionSize;
         }
+    }
+    //Check ThenTerminate If Exceed
+    if (dwPrivateBytes > RamExceed * 1024 * 1024) {
+        if (!TerminateProcess(hProcess, 0)) {
+            cerr << "Failed to terminate process. Error code: " << GetLastError() << endl;
+            CloseHandle(hProcess);
+            return -1;
+        }
+        cout << "Process terminated successfully." << endl;
+    }
+    else {
+        cout << "Process is not using more than " << RamExceed  << "MB of RAM. only using : " <<dwPrivateBytes/1024/1024<<"MB using NT API" << endl;
     }
 
     cout<<"Private RAM usage NT API (Closest to Windows Task Manager):" << dwPrivateBytes/1024<<"KB"<< endl;
